@@ -1,0 +1,18 @@
+# Python dependencies for the boat software in code/.
+#
+#   pip install -r requirements.txt
+#
+# Python 3.9 or newer is assumed (developed and tested with 3.12).
+
+# Plotting the planned route and the motion scores, and logging runs
+matplotlib>=3.7
+pandas>=2.0
+# pandas writes the run logs as .xlsx, which needs an Excel engine
+openpyxl>=3.1
+
+# Used by the simulator client and the archived development scripts
+numpy>=1.24
+
+# Optional: only needed if you talk to the INS and the GPS over a serial port
+# directly instead of using the course simulator (which is driven over UDP).
+# pyserial>=3.5

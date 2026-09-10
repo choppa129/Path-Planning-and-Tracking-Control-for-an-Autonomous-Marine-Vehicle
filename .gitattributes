@@ -1,0 +1,7 @@
+# Keep the text sources portable between Windows, macOS and Linux.
+* text=auto eol=lf
+
+# The slide deck embeds the onboard video, so it is far larger than the
+# per-file limit of a normal Git push.
+*.pptx filter=lfs diff=lfs merge=lfs -text
+*.mp4  filter=lfs diff=lfs merge=lfs -text
