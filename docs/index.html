@@ -12,16 +12,16 @@
 <aside class="panel"><span class="eyebrow">EXPERIMENT CONTROLS</span><label for="step">Expansion step <span class="value" id="stepv">19 px</span></label><input id="step" type="range" min="9" max="34" value="19">
 <label for="bias">Goal sample rate <span class="value" id="biasv">12%</span></label><input id="bias" type="range" min="0" max="50" value="12">
 <label for="angle">Max turn angle <span class="value" id="anglev">20°</span></label><input id="angle" type="range" min="10" max="180" value="20" step="5">
-<label for="pruneMode">Path post-processing</label><select id="pruneMode" aria-label="Path post-processing mode"><option value="angle" selected>Angle-constrained pruning</option><option value="standard">Standard shortcut pruning</option><option value="raw">Raw RRT route only</option></select><label class="toggle"><input id="prune" type="checkbox" checked>Show optimized path</label>
+<label for="radius">Minimum turning radius <span class="value" id="radiusv">35 px</span></label><input id="radius" type="range" min="10" max="100" value="35" step="5"><label for="pruneMode">Path post-processing</label><select id="pruneMode" aria-label="Path post-processing mode"><option value="radius" selected>Radius-aware pruning</option><option value="angle">Angle-constrained pruning</option><option value="standard">Standard shortcut pruning</option><option value="raw">Raw RRT route only</option></select><label class="toggle"><input id="prune" type="checkbox" checked>Show optimized path</label>
 <div class="actions"><button class="primary" id="run">Run RRT</button><button id="pause">Pause</button><button id="reset">Reset</button><button id="scenario">New obstacles</button></div>
 <div class="status" id="status" aria-live="polite">Ready. Press Run RRT to begin.</div>
-<div class="metrics"><div class="metric"><b id="nodes">0</b><span>Tree nodes</span></div><div class="metric"><b id="raw">—</b><span>Raw length (px)</span></div><div class="metric"><b id="short">—</b><span>Pruned length (px)</span></div><div class="metric"><b id="waypoints">—</b><span>Optimized waypoints</span></div><div class="metric"><b id="maxturn">—</b><span>Max turn angle</span></div><div class="metric"><b id="turnlimit">—</b><span>Angle limit met?</span></div></div></aside></div>
-<section class="note"><h2>How it works</h2><p>The planner samples a target, finds the nearest tree node, extends by a fixed step, and rejects edges that collide with inflated circular obstacles. It limits turning at each expansion and optionally samples toward the goal. Once a route is found, standard line-of-sight pruning removes intermediate waypoints using collision checks, while angle-constrained pruning also verifies the turn at both ends of each shortcut. A feasible path is not guaranteed for every configuration.</p><p><strong>Interact:</strong> Drag the green start or red goal marker to try a different route. The canvas uses illustrative map coordinates (pixels), not geographic coordinates. A fixed clearance of 12 pixels is added to obstacles.</p><p><strong>Provenance:</strong> This is a new browser reimplementation of concepts from the team's original Python RRT planner and project report, not the original simulator, a synchronized vessel trial, or measured navigation performance. Randomized results may vary. <a href="https://github.com/choppa129/Path-Planning-and-Tracking-Control-for-an-Autonomous-Marine-Vehicle/blob/main/docs/Yesterday_Ark_report.pdf">Read the project report ↗</a></p></section>
+<div class="metrics"><div class="metric"><b id="nodes">0</b><span>Tree nodes</span></div><div class="metric"><b id="raw">—</b><span>Raw length (px)</span></div><div class="metric"><b id="short">—</b><span>Pruned length (px)</span></div><div class="metric"><b id="waypoints">—</b><span>Optimized waypoints</span></div><div class="metric"><b id="maxturn">—</b><span>Max turn angle</span></div><div class="metric"><b id="turnlimit">—</b><span>Angle limit met?</span></div><div class="metric"><b id="radiusok">—</b><span>Radius-feasible?</span></div></div></aside></div>
+<section class="note"><h2>How it works</h2><p>The planner samples a target, finds the nearest tree node, extends by a fixed step, and rejects edges that collide with inflated circular obstacles. It limits turning at each expansion and optionally samples toward the goal. Once a route is found, standard line-of-sight pruning checks collision, angle-constrained pruning checks junction turns, and radius-aware pruning additionally attempts circular tangent fillets of the chosen minimum radius. Every sampled arc and connecting segment must clear the inflated obstacles. The radius-aware mode may reject a route rather than show an invalid smooth curve.</p><p><strong>Interact:</strong> Drag the green start or red goal marker to try a different route. The canvas uses illustrative map coordinates (pixels), not geographic coordinates. A fixed clearance of 12 pixels is added to obstacles. Turning radius is measured in illustrative pixels, not meters. Circular fillets are geometric approximations and do not guarantee dynamic feasibility under wind, current or actuator limits.</p><p><strong>Provenance:</strong> This is a new browser reimplementation of concepts from the team's original Python RRT planner and project report, not the original simulator, a synchronized vessel trial, or measured navigation performance. Randomized results may vary. <a href="https://github.com/choppa129/Path-Planning-and-Tracking-Control-for-an-Autonomous-Marine-Vehicle/blob/main/docs/Yesterday_Ark_report.pdf">Read the project report ↗</a></p></section>
 </main><footer>Yesterday's Ark · Shanghai Jiao Tong University · Autonomous Marine Vehicle Navigation & Control · <a href="https://choppa129.github.io/projects/autonomous-marine-vehicle/">Portfolio project ↗</a></footer>
 <script>
 "use strict";
 const canvas=document.getElementById('map'),ctx=canvas.getContext('2d'),$=id=>document.getElementById(id),W=900,H=615;
-let start={x:65,y:535},goal={x:830,y:75},obstacles=[],tree=[],path=null,shortPath=null,active=false,paused=false,iterations=0,drag=null,raf=null;
+let start={x:65,y:535},goal={x:830,y:75},obstacles=[],tree=[],path=null,shortPath=null,roundedPath=null,active=false,paused=false,iterations=0,drag=null,raf=null;
 const clearance=12,MAX=5000;
 function seededObstacles(){obstacles=[{x:215,y:405,r:58},{x:375,y:285,r:69},{x:570,y:405,r:75},{x:660,y:195,r:59},{x:390,y:495,r:42},{x:175,y:180,r:50}];}
 const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),lerp=(a,b,t)=>({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});
@@ -52,24 +52,97 @@ function anglePrune(route,limitDeg){if(!route||route.length<3)return route;
   for(const state of states[n-1].values())if(!best||state.cost<best.cost)best=state;
   return best?best.indices.map(i=>route[i]):null;
 }
-function refreshPruning(){if(!path){shortPath=null;return;}const mode=$('pruneMode').value;shortPath=mode==='raw'?null:mode==='standard'?standardPrune(path):anglePrune(path,Number($('angle').value));if(mode==='angle'&&!shortPath)$('status').textContent='No angle-feasible shortcut using these RRT nodes. Try a higher turn limit or another run.';updateStats();}
+// Circular tangent fillets: a polyline corner is replaced by a radius-R arc.
+// For turn angle theta, each adjacent straight segment needs R*tan(theta/2)
+// of tangent distance. Arc samples are checked against inflated obstacles.
+function fillet(a,b,c,R){
+ const d1=dist(a,b),d2=dist(b,c),theta=turnAt(a,b,c)*Math.PI/180;
+ if(d1<1e-7||d2<1e-7)return null;
+ if(theta<1e-5)return {entry:{...b},exit:{...b},points:[{...b}],trim:0};
+ if(theta>=Math.PI-1e-5)return null;
+ const trim=R*Math.tan(theta/2);
+ if(trim>=Math.min(d1,d2)-1e-5)return null;
+ const ux=(b.x-a.x)/d1,uy=(b.y-a.y)/d1,vx=(c.x-b.x)/d2,vy=(c.y-b.y)/d2;
+ const cross=ux*vy-uy*vx,side=Math.sign(cross);
+ if(!side)return null;
+ const entry={x:b.x-ux*trim,y:b.y-uy*trim},exit={x:b.x+vx*trim,y:b.y+vy*trim};
+ const center={x:entry.x-side*uy*R,y:entry.y+side*ux*R};
+ const begin=Math.atan2(entry.y-center.y,entry.x-center.x);
+ const steps=Math.max(4,Math.ceil(R*theta/5));
+ const points=Array.from({length:steps+1},(_,k)=>({x:center.x+R*Math.cos(begin+side*theta*k/steps),y:center.y+R*Math.sin(begin+side*theta*k/steps)}));
+ points[0]=entry;points[points.length-1]=exit;
+ for(let k=0;k<points.length;k++){if(!safePoint(points[k]))return null;if(k&& !safeEdge(points[k-1],points[k]))return null;}
+ return {entry,exit,points,trim};
+}
+function roundRoute(route,R,limit){
+ if(!route||route.length<2)return null;
+ if(route.length===2)return safeEdge(route[0],route[1])?route:null;
+ const arcs=[];
+ for(let i=1;i<route.length-1;i++){
+   if(turnAt(route[i-1],route[i],route[i+1])>limit+1e-7)return null;
+   const arc=fillet(route[i-1],route[i],route[i+1],R);
+   if(!arc)return null;
+   arcs.push(arc);
+ }
+ // No overlap between adjacent corner fillets on shared segments.
+ for(let i=0;i<arcs.length-1;i++)
+   if(arcs[i].trim+arcs[i+1].trim>=dist(route[i+1],route[i+2])-1e-5)return null;
+ const result=[route[0]];
+ for(const arc of arcs)result.push(...arc.points);
+ result.push(route[route.length-1]);
+ for(let i=1;i<result.length;i++)if(!safeEdge(result[i-1],result[i]))return null;
+ return result;
+}
+function radiusPrune(route,limit,R){
+ // First optimize for collision and angle; then progressively restore
+ // original waypoints when the requested circular fillets cannot fit.
+ // This is a conservative heuristic, not a globally optimal Dubins planner.
+ let candidate=anglePrune(route,limit);
+ if(!candidate)return null;
+ let rounded=roundRoute(candidate,R,limit);
+ if(rounded)return {route:candidate,rounded};
+ // Try less aggressive shortcuts using the original route as a fallback.
+ rounded=roundRoute(route,R,limit);
+ if(rounded)return {route,rounded};
+ return null;
+}
+function refreshPruning(){
+ roundedPath=null;
+ if(!path){shortPath=null;updateStats();return;}
+ const mode=$('pruneMode').value,limit=Number($('angle').value),R=Number($('radius').value);
+ if(mode==='raw')shortPath=null;
+ else if(mode==='standard')shortPath=standardPrune(path);
+ else if(mode==='angle')shortPath=anglePrune(path,limit);
+ else {const result=radiusPrune(path,limit,R);shortPath=result?result.route:null;roundedPath=result?result.rounded:null;}
+ if(mode==='radius'&&!roundedPath)$('status').textContent='No feasible circular fillets for this route and radius. Reduce radius, increase angle limit, or rerun RRT.';
+ else if(mode==='angle'&&!shortPath)$('status').textContent='No angle-feasible shortcut using these RRT nodes.';
+ else if(path)$('status').textContent='Route available. Compare raw, pruned and rounded geometry.';
+ updateStats();
+}
 function length(route){if(!route)return null;return route.slice(1).reduce((v,p,i)=>v+dist(route[i],p),0);}
-function updateStats(){$('nodes').textContent=tree.length;$('raw').textContent=path?Math.round(length(path)):'—';$('short').textContent=shortPath?Math.round(length(shortPath)):'—';$('waypoints').textContent=shortPath?shortPath.length:'—';$('maxturn').textContent=shortPath?maxTurn(shortPath).toFixed(1)+'°':path?maxTurn(path).toFixed(1)+'°':'—';$('turnlimit').textContent=shortPath?(maxTurn(shortPath)<=Number($('angle').value)+1e-8?'Yes':'No'):'—';}
+function updateStats(){
+ $('nodes').textContent=tree.length;$('raw').textContent=path?Math.round(length(path)):'—';
+ $('short').textContent=shortPath?Math.round(length(roundedPath||shortPath)):'—';
+ $('waypoints').textContent=shortPath?shortPath.length:'—';
+ $('maxturn').textContent=shortPath?maxTurn(shortPath).toFixed(1)+'°':path?maxTurn(path).toFixed(1)+'°':'—';
+ $('turnlimit').textContent=shortPath?(maxTurn(shortPath)<=Number($('angle').value)+1e-8?'Yes':'No'):'—';
+ $('radiusok').textContent=!path?'—':$('pruneMode').value==='radius'?(roundedPath?'Yes':'No'):'Not checked';
+}
 function line(a,b,color,width){ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();}
 function marker(p,color,label){ctx.beginPath();ctx.fillStyle=color;ctx.arc(p.x,p.y,9,0,Math.PI*2);ctx.fill();ctx.fillStyle='#111';ctx.font='bold 18px system-ui';ctx.fillText(label,p.x+14,p.y-12);}
 function draw(){ctx.clearRect(0,0,W,H);ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);ctx.strokeStyle='#edf0f3';ctx.lineWidth=1;for(let x=0;x<W;x+=45){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}for(let y=0;y<H;y+=45){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
 for(const o of obstacles){ctx.beginPath();ctx.arc(o.x,o.y,o.r+clearance,0,Math.PI*2);ctx.fillStyle='rgba(212,229,249,.38)';ctx.fill();ctx.strokeStyle='#90b2d9';ctx.setLineDash([6,5]);ctx.stroke();ctx.setLineDash([]);ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fillStyle='#d4e5f9';ctx.fill();ctx.strokeStyle='#7ba1c8';ctx.stroke();}
 for(let i=1;i<tree.length;i++){const n=tree[i];if(n.parent>=0)line(tree[n.parent],n,'rgba(105,125,145,.48)',1.25);}
 if(path)for(let i=1;i<path.length;i++)line(path[i-1],path[i],'#e85d28',3);
-if(shortPath&&$('prune').checked)for(let i=1;i<shortPath.length;i++)line(shortPath[i-1],shortPath[i],'#116ed1',5);
+if(shortPath&&$('prune').checked){const shown=roundedPath||shortPath;for(let i=1;i<shown.length;i++)line(shown[i-1],shown[i],'#116ed1',5);}
 marker(start,'#178b66','START');marker(goal,'#d94841','GOAL');}
 function tick(){if(active&&!paused){for(let i=0;i<18&&active;i++)stepOnce();if(iterations>MAX){active=false;$('status').textContent='Search limit reached. Try another configuration.';}updateStats();}draw();raf=requestAnimationFrame(tick);}
-function reset(){active=false;paused=false;iterations=0;tree=[{...start,parent:-1}];path=null;shortPath=null;$('pause').textContent='Pause';$('status').textContent='Ready. Press Run RRT to begin.';updateStats();draw();}
+function reset(){active=false;paused=false;iterations=0;tree=[{...start,parent:-1}];path=null;shortPath=null;roundedPath=null;$('pause').textContent='Pause';$('status').textContent='Ready. Press Run RRT to begin.';updateStats();draw();}
 $('run').onclick=()=>{reset();active=true;$('status').textContent='Exploring free space…';};
 $('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Resume':'Pause';};
 $('reset').onclick=reset;
 $('scenario').onclick=()=>{let attempt=0;do{obstacles=Array.from({length:6},()=>({x:110+Math.random()*650,y:80+Math.random()*440,r:35+Math.random()*37}));attempt++;}while(attempt<50&&(!safePoint(start)||!safePoint(goal)));reset();};
-for(const id of ['step','bias','angle']){$(id).oninput=()=>{$(id+'v').textContent=$(id).value+(id==='angle'?'°':id==='bias'?'%':' px');if(id==='angle')refreshPruning();};}$('pruneMode').onchange=()=>{refreshPruning();draw();};
+for(const id of ['step','bias','angle','radius']){$(id).oninput=()=>{$(id+'v').textContent=$(id).value+(id==='angle'?'°':id==='bias'?'%':' px');if(id==='angle'||id==='radius')refreshPruning();};}$('pruneMode').onchange=()=>{refreshPruning();draw();};
 $('prune').onchange=draw;
 function pos(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
 canvas.addEventListener('pointerdown',e=>{const p=pos(e);drag=dist(p,start)<24?'start':dist(p,goal)<24?'goal':null;if(drag)canvas.setPointerCapture(e.pointerId);});
