@@ -10,6 +10,14 @@ inertial navigation system (INS) and a GPS receiver.
 
 **Team:** Xue Jiang, Linyu Li, Ruoxuan Wang, Lixing Rui, Yumeng Du, Runtao Zhang
 
+## Interactive RRT demo
+
+**[Open the browser-based RRT Navigation Lab](https://choppa129.github.io/Path-Planning-and-Tracking-Control-for-an-Autonomous-Marine-Vehicle/)**
+
+The standalone site lives in [`docs/index.html`](docs/index.html). It visualizes a browser reimplementation of RRT with obstacle clearance, goal bias, turning-angle constraints, tree growth and collision-checked path pruning. Drag start/goal markers and experiment with controls. The map and performance values are **illustrative browser simulation**, not logged data from the original vessel tests.
+
+> **Publishing:** To make the above URL live, enable GitHub Pages for this repository using **Settings → Pages → Deploy from a branch → main → /docs**. The demo file is already committed.
+
 ## Repository contents
 
 | Path | What it is |
